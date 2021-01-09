@@ -2,8 +2,9 @@
 import random
 import discord
 import json
+import requests
 from discord.appinfo import AppInfo
-from discord.ext import commands
+from discord.ext import commands, tasks
 #=======================derfining variables and global Meathods===================
 playerList = []
 jail = []
@@ -170,37 +171,37 @@ class CommunityCard:
     def __init__ (self, Type, value, name, customFunc=lambda:None):
         self.name = name
         self.value = value
-        self.type = Type
+        self.Type = Type
         self.customFunc = customFunc
     def takeFromAll(self,amount,reciving):
         for i in playerList:
             i.payPlayer(reciving, amount)
     def activate(self, player):
         #important becasue it has the player it will be effecting
-        if self.type == "payOut": 
+        if self.Type == "payOut": 
             player.payBank(self.value)
-        elif self.type == "payIn": 
+        elif self.Type == "payIn": 
             player.payIn(self.value)
-        elif self.type == "takeFromAll": 
+        elif self.Type == "takeFromAll": 
             self.takeFromAll(self.value, player)
-        elif self.type == "forwardsSet": 
+        elif self.Type == "forwardsSet": 
             if self.value - player.place > 0: 
                 player.moveForward(self.value-player.place) 
             else: 
                 player.moveForward(self.value - player.place+40)
-        elif self.type == "backwardsSet": 
+        elif self.Type == "backwardsSet": 
             player.moveBackwards(player.place-self.value)
-        elif self.type == "move":
+        elif self.Type == "move":
             if self.value > 0: 
                 player.moveForward(self.value)
             else: 
                 player.moveBackwards(self.value) 
-        elif self.type == "getOut": 
+        elif self.Type == "getOut": 
             player.getOutOfJail += 1
-        elif self.type == "jail": 
+        elif self.Type == "jail": 
             player.goesToJail
         else: 
-            print("error, please select valid card", self.type)
+            print("error, please select valid card", self.Type)
         self.customFunc()
 #=======================player class=======================
 class Player:
@@ -440,7 +441,7 @@ PropertyCardDeck = {#ordered deck where each card corrisponds to the board
 PropertyNameDeck = [str(PropertyCardDeck[x].name) for x in PropertyCardDeck]# just the names
 #===========community chests
 
-class communityCardDeck:
+class CommunityCardDeck:
     def __init__(self, cards):
         self.cards = cards
         self.tmpDeck = []# just here to hold the cards while being shuffeled
@@ -459,8 +460,9 @@ class communityCardDeck:
         self.cards.remove(self.card)
         self.cards.append(self.card)
         return self.card
-  
-CommunityCards = communityCardDeck([
+
+
+CommunityCards = CommunityCardDeck([
     #paid out
     CommunityCard("payOut", 50, "Only Fans Payment, Cough up £50, Simp"),
     CommunityCard("payOut", 50,  "You buy someone dinner who doesnt love you. Pay £50"),
@@ -484,7 +486,7 @@ CommunityCards = communityCardDeck([
     CommunityCard("getOut", 1, "Get out of jail free card! This can be saved for later."),
     CommunityCard("jail", 1, "Go to jail, Or pay £50 to get out")
 ])
-ChanceCards = communityCardDeck([   
+ChanceCards = CommunityCardDeck([   
     #payout
     CommunityCard("payOut", 15, "You slurge on a tastey sandwich, £15"),
     CommunityCard("payOut", 20,  "Your Neighbour is strapped for cash and generosity takes the better of you, Loose £20"),
@@ -553,7 +555,20 @@ BoulderWorld
 ]
 
 #===========board state stuff=============
-
+class Board:
+    def __init__(self):
+        self.players = []
+        self.Deck = CardDeck
+        self.PropertyCards = PropertyCardDeck
+        self.ChanceCards = ChanceCards
+        self.CommunityChests = CommunityCards
+        self.status = None
+        self.turn = None
+    def next(self):
+        self.turn = next(self.players)
+    def changeStatus(self):
+        #do code later
+        return None
 
 #=======testing==========
 
@@ -564,8 +579,7 @@ client = commands.Bot(command_prefix='.')# the command charector for this bot
 #client comands
 
 
-async def announcement(anountcment, channel):
-    await channel.send(announcement)
+
 
 #user commands
 #on ready
@@ -585,151 +599,6 @@ async def on_ready():
             channels = [x.name for x in category.channels]
             if "general-monopoly" not in channels:
                 await category.create_text_channel("general-monopoly")
-
-
-#join
-@client.command()
-async def join(ctx):# this command adds the userto the player list, makes them a channel, and gives them a satatus
-    #getting vars in order
-    member = ctx.author
-    userName = member.display_name# username 
-    server = ctx.guild
-    channelName = f"{userName} Money".replace(" ", "-").lower()
-    category = discord.utils.get(server.categories, name = "MONOPOLY")
-    channel = discord.utils.get(category.channels, name = channelName)
-    general = discord.utils.get(category.channels, name ="general-monopoly")
-
-
-    if channel == None:# checks if the channel doesnt exist
-        await category.create_text_channel(f"{userName}' Money")
-        channel = discord.utils.get(ctx.guild.channels, name = channelName)
-    await ctx.send(f"{userName} Has joined the game! They now has thier own money channel.")
-    
-    #setting permissions for the channel
-    await channel.set_permissions(ctx.guild.default_role, view_channel = False)
-    await channel.set_permissions(member, view_channel = True)
-    #creating player
-    player = Player(userName, 1500, member, channel, category, general)
-    playerList.append(player)
-    await channel.send(player.sumUp())
-#roll
-@client.command()
-async def roll(ctx):
-    await clear(ctx,1)
-    player = getPlayer(ctx)
-    player.roll()
-    await player.general.send("\n:game_die:========Dice roll=========:game_die:"+f"\n<@{player.member.id}> You Rolled a "+str(player.rollValue[0])+" and a "+str(player.rollValue[1])+"\nTotal: "+str(player.lastRoll))
-
-#buy property
-@client.command()
-async def buy(ctx, propertyNumber="default"):
-    await clear(ctx,1)
-    player = getPlayer(ctx)
-    if propertyNumber == "default": 
-        propertyNumber = player.place
-    property = PropertyCardDeck[int(propertyNumber)]
-    if player.cash < property.siteValue:
-        await player.channel.send(f"You cannot buy this you dont have enough")
-    elif property.owner == player:
-        property.buyHouse()
-    elif property.owner == "NotYetAssigned":
-        player.buyProperty(property)
-        await player.channel.send(f":dollar:=====Money Out=====:dollar:\nYou bought **{property.name}** for **£{property.siteValue}**\nRemaining: **£{player.cash}**")
-        await player.general.send(f"{player.name} just bought property:\n{property.name}")
-    else:
-        await player.general.send(f"You cannot buy this as {property.owner.name} already owns it")
-
-#give player overview
-@client.command()
-async def o(ctx):
-    await clear(ctx,1)
-    await getPlayer(ctx).channel.send(getPlayer(ctx).sumUp())
-
-#list
-@client.command()
-async def list(ctx, *, scope = "remaining"):
-    await clear(ctx,1)
-    player = getPlayer(ctx)
-     #this is a mess of a statment but it prints all of the properties on code block format using a forloop list that is joined with \n and makes it red if its owned
-    await player.general.send("```diff\n"+"\n".join(str(("-" if PropertyCardDeck[x].owner != "NotYetAssigned" else "")+str(x)+" - "+": £"+str(PropertyCardDeck[x].siteValue)+", "+PropertyCardDeck[x].colour+": "+PropertyCardDeck[x].name) for x in PropertyCardDeck)+"```")
-# pick chance card
-@client.command()
-async def chance(ctx):
-    await clear(ctx,1)
-    player = getPlayer(ctx)
-    card = ChanceCards.randomCard()
-    print(card.name)
-    card.activate(player)
-    await player.general.send(f"{player.name} has chosen a chance card they got: \n"+card.name)
-# pick community card
-@client.command()
-async def community(ctx):
-    await clear(ctx,1)
-    player = getPlayer(ctx)
-    card = CommunityCards.randomCard()
-    print(card.name)
-    card.activate(player)
-    await player.general.send(f"{player.name} has chosen a chance card they got: \n"+card.name)
-
-#move after rolling
-@client.command()
-async def move(ctx, set = 1):
-    player = getPlayer(ctx)
-    if set == 1: set = player.lastRoll
-    player.moveForward(set)
-    await player.general.send(f"<@{player.member.id}> landed on tile {player.place}: {CardDeck[player.place].name}")
-#deeds
-@client.command()
-async def deeds(ctx, propertyNumber):
-    await clear(ctx, 1)
-    player = getPlayer(ctx)
-    property = PropertyCardDeck[int(propertyNumber)]
-    await player.channel.send(f"<@{player.member.id}> here are the deeds: \n{property.sumUp()}")
-#pay
-@client.command()
-async def pay(ctx, value=0, target="default"):
-    await clear(ctx)
-    player = getPlayer(ctx)
-    currentSpot = CardDeck[player.place]
-    if target == "default":
-        if isinstance(currentSpot, PropertyCard or UtilityCard or TransportCard) and currentSpot.owner != "NotYetAssigned": 
-            player.payRent(currentSpot)
-        else: 
-            print("cannot pay that")
-    else:
-        target = getPlayerFromName(ctx.message.mentions[0].display_name)
-        player.payPlayer(target, value)
-        await target.channel.send(f":dollar:=====Money In=====:dollar:\nYou have been given: **£{value}** from the {player.name} ")
-        await player.channel.send(f":dollar:=====Money Out=====:dollar:\nYou have graciously given: **£{value}** from the {target.name} ")
-@client.command()
-async def sell(ctx, item, target):
-    player = getPlayer(ctx)
-    if item == "house":
-        PropertyCardDeck[int(target)].subHouse()  
-        await player.channel.send("You sold your house.")
-    elif "@" in target and PropertyCardDeck[int(item)] in player.getProperties():
-        target = getPlayerFromName(ctx.message.mentions[0].display_name)
-        PropertyCardDeck[int(item)].transferOwner(target)
-        await player.general.send(f"**{player.name}** has sold **{PropertyCardDeck[item].name}** to {target.name}")
-
-
-#give
-@client.command()
-async def give(ctx, value, target="default"):
-    player = getPlayerFromName(ctx.message.mentions[0].display_name)
-    player.payIn(int(value))
-    await player.channel.send(f":dollar:=====Money In=====:dollar:\nYou have been given: **£{value}** from the bank ")
-#take
-@client.command()
-async def take(ctx, value, target="default"):
-    player = getPlayerFromName(ctx.message.mentions[0].display_name)
-    player.payBank(int(value))
-    await player.channel.send(f":dollar:=====Money Out=====:dollar:\nYou have graciously given: **£{value}** from the bank ")
-
-#clear
-@client.command()
-async def clear(ctx, amount = 1):
-    await ctx.channel.purge(limit=amount)
 
 Token = open("hidden/BotToken.json","r")
 Token = json.loads(Token.read())
