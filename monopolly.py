@@ -1,6 +1,7 @@
 #=======================imports===============================
 import random
 import discord
+import json
 from discord.appinfo import AppInfo
 from discord.ext import commands
 #=======================derfining variables and global Meathods===================
@@ -730,5 +731,6 @@ async def take(ctx, value, target="default"):
 async def clear(ctx, amount = 1):
     await ctx.channel.purge(limit=amount)
 
-    
-client.run("Nzk2NzU5ODc2NzYzOTEwMTY0.X_cmdQ.Dw4vLoNKgWaAqEyS5bxdDGfIkic")
+Token = open("hidden/BotToken.json","r")
+Token = json.loads(Token.read())
+client.run(Token)
