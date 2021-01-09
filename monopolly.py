@@ -2,9 +2,11 @@
 import random
 import discord
 import json
-import requests
+from discord.abc import PrivateChannel
+#import request
 from discord.appinfo import AppInfo
 from discord.ext import commands, tasks
+from itertools import cycle
 #=======================derfining variables and global Meathods===================
 playerList = []
 jail = []
@@ -17,8 +19,8 @@ def bankrupcy(player, bankrupter):
         for i in player.getProperties():
             bankrupter.payIn((i.houses*i.costOfHouse)/2)# pays th ebankrupter half of the value of the houses
             i.transferOwner(bankrupter)
-def getPlayer(ctx):
-    for i in playerList:
+def getPlayer(ctx, board):
+    for i in board.playerList:
         if i.name == ctx.author.display_name:
             return i
     return None
@@ -27,6 +29,10 @@ def getPlayerFromName(display_name):
         if i.name == display_name:
             return i
     return None
+def getBoard(ctx):
+    for i in games:
+        if i.server.id == ctx.guild.id:
+            return i
 #=======================property class=======================
 class PropertyCard:#add morgage
     def __init__(self,colour, siteValue, rentList, costOfHouse, name): #defining initial variables for houses.
@@ -205,7 +211,7 @@ class CommunityCard:
         self.customFunc()
 #=======================player class=======================
 class Player:
-    def __init__(self, name, cash, member = None, channel = None, category = None, general = None):
+    def __init__(self, name, cash, member = None, private = None, category = None, general = None):
         self.name = name
         self.cash = cash
         self.inJail = False
@@ -213,7 +219,7 @@ class Player:
         self.place = 0
         self.lastRoll = 0
         self.rollValue = [0,0]
-        self.channel = channel
+        self.private = private
         self.category = category
         self.general = general
         self.member = member
@@ -306,8 +312,8 @@ class Player:
     def moveForward(self, value):
         self.place += value
         if self.place > 39:
-            self.place -=39
-            self.giveSalary()
+            self.place = self.place - 39
+            self.payIn(200)
     def moveBackwards(self, value):
         self.place -= value
         if self.place < 1:
@@ -516,13 +522,13 @@ CardDeck = [#ordered deck where each card corrisponds to the board
 ShitCreak,
 CommunityCards.randomCard(),
 APaddle,
-"tax: 200",
+CommunityCard("payOut", 100, "Income Tax, £200 has been taken from your account"),
 ChungusExpress,
 SmokingAlley,
 ChanceCards.randomCard(),
 TheGreenRoom,
 Wellington,
-"jail",
+"Jail",
 MawhinneyGardens,
 DiscordNitro,
 LiquorStreet,
@@ -542,7 +548,7 @@ Medows,
 BelvoirForrest,
 SpotifyPremium,
 Botanic,
-"go to jail",
+CommunityCard("jail", 0, "Go to Jail, Do not pass Go, do not collect £200"),
 TheParlour,
 ThompsonsGrarage,
 CommunityCards,
@@ -550,13 +556,15 @@ TheLongfellow,
 BigDipper,
 ChanceCards,
 HotRocks,
-"tax: 100",
+CommunityCard("payOut", 100, "Super Tax, £200 has been taken from your account"),
 BoulderWorld
 ]
 
 #===========board state stuff=============
 class Board:
-    def __init__(self):
+    def __init__(self, server):
+        self.server = server
+        self.playerList = []
         self.players = []
         self.Deck = CardDeck
         self.PropertyCards = PropertyCardDeck
@@ -564,11 +572,66 @@ class Board:
         self.CommunityChests = CommunityCards
         self.status = None
         self.turn = None
+    def addPlayer(self, player):
+        self.playerList.append(player)
+        self.players = cycle(self.playerList)
     def next(self):
         self.turn = next(self.players)
+        print(self.turn)
     def changeStatus(self):
         #do code later
         return None
+    def getPlaceName(self, index):
+        tmplist = []
+        for i in self.Deck:
+            if isinstance(i, PropertyCard or TransportCard or UtilityCard):
+                tmplist.append(i.name)
+            elif isinstance(i, CommunityCard):
+                if i.name == "Super Tax, £200 has been taken from your account":
+                    tmplist.append("Super Tax: £100")
+                elif i.name == "Income Tax, £200 has been taken from your account":
+                    tmplist.append("Income Tax: £200")
+                elif i in ChanceCards.cards:
+                    tmplist.append("Chance Card")
+                elif i in CommunityCards.cards:
+                    tmplist.append("Community Chest")
+                else:
+                    tmplist.append("not chance community or tax")
+            elif i == "Go":
+                tmplist.append(i)
+            elif i == "Jail":
+                tmplist.append(i)
+            elif i == "Free Parking":
+                tmplist.append(i)
+        return tmplist[index]
+    def listBoard(self):#lists all of the board positions
+        tmplist = []
+        for i in self.Deck:
+            if isinstance(i, PropertyCard or TransportCard or UtilityCard):
+                tmplist.append(str(self.Deck.index(i))+". "+i.name)
+            elif isinstance(i, CommunityCard):
+                if i.name == "Super Tax, £200 has been taken from your account":
+                    tmplist.append(str(self.Deck.index(i))+". "+"Super Tax: £100")
+                elif i.name == "Income Tax, £200 has been taken from your account":
+                    tmplist.append(str(self.Deck.index(i))+". "+"Income Tax: £200")
+                elif i in ChanceCards.cards:
+                    tmplist.append(str(self.Deck.index(i))+". "+"Chance Card")
+                elif i in CommunityCards.cards:
+                    tmplist.append(str(self.Deck.index(i))+". "+"Community Chest")
+                else:
+                    tmplist.append("not chance community or tax")
+            elif i == "Go":
+                tmplist.append(str(self.Deck.index(i))+". "+i)
+            elif i == "Jail":
+                tmplist.append(str(self.Deck.index(i))+". "+i)
+            elif i == "Free Parking":
+                tmplist.append(str(self.Deck.index(i))+". "+i)
+        sumUp = ["```\n",
+                "=====The monopoly Board=====",
+                "\n".join(tmplist),#All boards listed
+                "```"]
+        return "\n".join(sumUp)
+        
 
 #=======testing==========
 
@@ -579,26 +642,79 @@ client = commands.Bot(command_prefix='.')# the command charector for this bot
 #client comands
 
 
-
-
+games =[]
+servers = []
 #user commands
 #on ready
 @client.event
 async def on_ready():
     print("reporting for duty")
-    servers = client.guilds
-    for server in servers:# this block gets applied on a per server basis
-        categorys = [x.name for x in server.categories]
-        if "MONOPOLY" not in categorys:
-            await server.create_category("MONOPOLY")
-            category = discord.utils.get(server.categories, name = "MONOPOLY")
-            await category.create_text_channel("general-monopoly")
-            monopolyCategory = category
-        else:
-            category = discord.utils.get(server.categories, name = "MONOPOLY")
-            channels = [x.name for x in category.channels]
-            if "general-monopoly" not in channels:
-                await category.create_text_channel("general-monopoly")
+#===start===
+@client.command()
+async def start_game(ctx):# creates or cleans the channels needed for the game, aswell as creates the board object for the server
+    #defining varialble 
+    server = ctx.guild
+    games.append(Board(server))
+    board = getBoard(ctx)
+    serverCategorys = [x.name for x in server.categories]# getting all of the servers categorys
+    #creatting and cleaning the text channels
+    if "MONOPOLY" not in serverCategorys: # if there isnt the monopoly category in the server it creates it
+        await server.create_category("MONOPOLY")# creates the category
+        category = discord.utils.get(server.categories, name = "MONOPOLY")# finds it
+        await category.create_text_channel("general-monopoly")# creates the monopoly general
+    else:# if its already there
+        category = discord.utils.get(server.categories, name = "MONOPOLY")# finds the category
+        for channel in category.channels:
+            await channel.delete()
+        await category.create_text_channel("general-monopoly")
+    #setting permisions for general so only players that have joined can see it
+    general  = discord.utils.get(category.channels, name = "general-monopoly")#finds the channel
+    await general.set_permissions(server.default_role, view_channel = False)#default invisbale
+    await server.create_role(name = "Monopoly_Player")
+    role = discord.utils.get(server.roles, name="Monopoly_Player")
+    await general.set_permissions(role, view_channel = True)
+    print("Game Started by",ctx.author.display_name)
+#===join===
+@client.command()
+async def join(ctx):
+    # settign up needed variables
+    server = ctx.guild
+    member = ctx.author
+    userName = member.display_name
+    board = getBoard(ctx)
+    privateChannelName = f"{userName} Money".replace(" ", "-").lower()
+    category = discord.utils.get(server.categories, name = "MONOPOLY")
+    general = discord.utils.get(category.channels, name="general-monopoly")
+    privateChannel = discord.utils.get(category.channels, name=privateChannelName)
+    #creating players private channel if it doesnt exist, cleaning it if it does exist
+    if privateChannel == None: #creates it
+        await category.create_text_channel(name = privateChannelName)
+        privateChannel = discord.utils.get(category.channels, name=privateChannelName)
+    else:#replaces it
+        await PrivateChannel.delete()
+        await category.create_text_channel(name = privateChannelName)
+        privateChannel = discord.utils.get(category.channels, name=privateChannelName)
+    #setting permisions
+    await privateChannel.set_permissions(server.default_role, view_channel = False)#default invisable
+    await privateChannel.set_permissions(member, view_channel = True)# makes it visable to the player
+    await member.add_roles(discord.utils.get(server.roles, name = "Monopoly_Player"))
+    #creating the player object    
+    player = Player(userName, 1500, member, privateChannel, category, general)
+    board.addPlayer(player)
+    await player.private.send(board.listBoard())
+    print(userName, "has joined the game")
+
+#===roll===
+@client.command()
+async def roll(ctx):
+    #defining variables
+    board = getBoard(ctx)
+    player = getPlayer(ctx, board)
+    player.roll()
+    print(player.lastRoll)
+    player.moveForward(player.lastRoll)
+    print(f"player landed on {board.getPlaceName(player.place)}")
+
 
 Token = open("hidden/BotToken.json","r")
 Token = json.loads(Token.read())
