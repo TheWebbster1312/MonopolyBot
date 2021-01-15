@@ -7,9 +7,11 @@ from discord.abc import PrivateChannel
 from discord.appinfo import AppInfo
 from discord.ext import commands, tasks
 from itertools import cycle
+from PIL import Image
+from discord.utils import resolve_template
 #=======================derfining variables and global Meathods===================
 playerList = []
-jail = []
+
 def bankrupcy(player, bankrupter):
     print(player.name, "is bankrupt")
     playerList.remove(player)
@@ -41,12 +43,12 @@ class PropertyCard:#add morgage
         self.siteValue = siteValue
         self.rentList = rentList # rent will be a list ranging 0-5 where 0 is site rent and 1 is 1 house rent etc 5 is a hotel rent.
         self.costOfHouse = costOfHouse
-        self.morgate = self.siteValue/2
+        self.morgateValue = self.siteValue/2
         self.owner = "NotYetAssigned"
         self.houses = 0
         self.rent = self.rentList[self.houses]
         self.monopolized = False
-
+        self.Mortgaged = False
     def assignOwner(self,newOwner):#sets the owner of the property, when they buy the property
         self.owner = newOwner
         self.owner.update(self)
@@ -61,21 +63,34 @@ class PropertyCard:#add morgage
     def updateRent(self): #will update the rent value based on houses owned
         self.rent = self.rentList[self.houses]
     def buyHouse(self):#adds a house === and error catching for unassigned owner and only upgrade them linearly
-        if self.houses < 5:
+        if self.houses < 4:
             if self.monopolized:
-                if self.checkNeighbourEquivilent():
+                if self.canBuyHouse():
                     self.houses += 1
                     self.owner.payBank(self.costOfHouse)
                     self.updateRent()
                     speak(self.owner.general,f"<@{self.owner.member.id}> just bought house a **house** for **{self.name}**")
+                    self.owner.board.updateBoardImageHouses(self)
                 else:
                     speak(self.owner.general,f"<@{self.owner.member.id}>You must have all properties at the same number of house before you buy more")
             else:
                 speak(self.owner.general,f"<@{self.owner.member.id}>You need to monopolize {self.colour} to buy a house first")
         else:
             print("too many houses")
-    def subHouse(self):#takes away a house
-        self.house += -1
+    def sellHouse(self):#takes away a house
+        if self.houses != 0:
+            if self.canSellHouse():
+                self.houses -= 1
+                self.owner.payIn(int(self.costOfHouse/2))
+                self.updateRent()
+                speak(self.owner.general,f"<@{self.owner.member.id}> just sold house a **house** for **{self.name}**")
+                self.owner.board.updateBoardImageHouses(self)
+                self.owner.announceMoneyUpdate("in", int(self.costOfHouse/2), f"for selling a house on **{self.name}**")
+            else:
+                speak(self.owner.general,f"<@{self.owner.member.id}>You must have all properties at the same number of house before you sell more")
+        else:
+            speak(self.owner.general, "You cannot sell any more houses on this property")
+
     def monopolize(self):
         self.monopolized = True
         if self.houses == 0:
@@ -84,19 +99,67 @@ class PropertyCard:#add morgage
         self.monopolized = False
         if self.houses == 0:
             self.rent = self.rentList[0]
-    def checkNeighbourEquivilent(self):
-        self.neibouringStreets = []
-        for i in self.owner.properties[self.colour]: 
-            if isinstance(i,int):# checks if its an intager and skips
+    def mortgage(self):
+        if self.Mortgaged == False:
+            self.Mortgaged = True
+            self.owner.properties[self.colour].remove(self)
+            self.owner.mortgaged.append(self)
+            self.owner.payIn(self.morgateValue)
+            speak(self.owner.general, f"{self.owner.name} just morgated {self.name}")
+            self.owner.announceMoneyUpdate("In", self.morgateValue, f"for mortgaging {self.name}")
+        else:
+            speak(self.owner.general, "Already mortgaged")
+    def deMorgage(self):
+        if self.Mortgaged == True:
+            self.Mortgaged = False
+            self.owner.mortgaged.remove(self)
+            self.owner.properties[self.colour].append(self)
+            self.owner.payBank(int(self.morgateValue+self.morgateValue*0.1))
+            speak(self.owner.general, f"{self.owner.name} just demorgated {self.name}")
+            self.owner.announceMoneyUpdate("Out", self.morgateValue, f"for demortgaging {self.name}")
+        else:
+            speak(self.owner.general, "Already demortgages")
+    def canBuyHouse(self):
+        # make sue other houses of same colour are no more than +-1 house from the rest
+        #the most can only be 1 greater than the least
+        #the least can only be 1 less than the most
+        ifHappened = self.houses+1# this is used to check what the outcome would be if a house were bought
+        most = ifHappened
+        least = ifHappened
+        for i in self.owner.properties[self.colour]:
+            if isinstance(i, int) or i == self:# skips the number in the list and itself
                 continue
-            self.neibouringStreets.append(i.houses)
-        for i in self.neibouringStreets:
-            if self.neibouringStreets[0] >= self.houses:
+            if i.houses < least:
+                least = i.houses
+            elif i.houses > most:
+                most = i.houses
+        if most-least <= 1:
+            return True
+        else:
+            return False
+    def canSellHouse(self):
+        # make sue other houses of same colour are no more than +-1 house from the rest
+        #the most can only be 1 greater than the least
+        #the least can only be 1 less than the most
+        ifHappened = self.houses-1# this is used to check what the outcome would be if a house were bought
+        most = ifHappened
+        least = ifHappened
+        for i in self.owner.properties[self.colour]:
+            if isinstance(i, int) or i == self:# skips the number in the list and itself
                 continue
-            else: 
-                return False
-        return True
-    def sumUp(self):
+            if i.houses < least:
+                least = i.houses
+            elif i.houses > most:
+                most = i.houses
+        if most-least <= 1:
+            return True
+        else:
+            return False
+def sumUp(self):
+        if self.owner == "NotYetAssigned":
+            name = "not owned"
+        else:
+            name = self.owner.name
         sumUp = [f"```\n=======Deeds for {self.name}=======",
                 f"Colour: {self.colour}",
                 f"Site Value: £{self.siteValue}",
@@ -110,6 +173,7 @@ class PropertyCard:#add morgage
                 "===Houses and Hotels===",
                 f"House : £{self.costOfHouse}",
                 f"Hotel : 4 Houses + £{self.costOfHouse}",
+                f"Current Owner: {name}",
                 "```"]
         return "\n".join(sumUp)
 #=======================transport cards===================
@@ -119,13 +183,14 @@ class TransportCard:
         self.siteValue = 200
         self.colour = "transport"
         self.owner = "NotYetAssigned" 
-        self.rentList = [25,50,100,200]
+        self.rentList = [0,25,50,100,200]
         
     def assignOwner(self, newOwner):
         self.owner = newOwner
         self.owner.update(self)
         self.owner.payOut(self.siteValue)
         self.updateRent()
+        self.updateOtherRent()
     def transferOwner(self,newOwner):#sets the new owenr for free
         self.owner.removeProperty(self)
         speak(self.owner.private, f"You **Lost** **{self.name}**")
@@ -134,9 +199,11 @@ class TransportCard:
         self.owner.update(self)
     def updateRent(self):
         self.rent = self.rentList[len(self.owner.properties["transport"])]
+    def updateOtherRent(self):
         for i in self.owner.properties["transport"]:
             if i != self: i.updateRent()
     def sumUp(self):
+        name = self.owner.name if self.owner == "NotYetAssigned" else "Not Owned"
         sumUp = [f"```\n=======Deeds for {self.name}=======",
                 f"Type: {self.colour}",
                 f"Site Value: £{self.siteValue}",
@@ -145,6 +212,7 @@ class TransportCard:
                 f"2 Transports owned: £{self.rentList[1]}",
                 f"3 Transports owned: £{self.rentList[2]}",
                 f"4 Transports owned: £{self.rentList[3]}",
+                f"Current Owner: {name}",
                 "```"]
         return "\n".join(sumUp)
 #=======================utility cards===================
@@ -172,12 +240,17 @@ class UtilityCard:
         else:
             self.rent = 10*roll
     def sumUp(self):
+        if self.owner == "NotYetAssigned":
+            name = "not owned"
+        else:
+            name = self.owner.name
         sumUp = [f"```\n=======Deeds for {self.name}=======",
                 f"Type: {self.colour}",
                 f"Site Value: £{self.siteValue}",
                 "===Rent===",
                 f"1 Utility owned: 4 x Players roll",
                 f"2 Utility owned: 10 x Players roll",
+                f"Current Owner: {name}",
                 "```"]
         return "\n".join(sumUp)
 #======================community/chance Cards====================
@@ -211,7 +284,7 @@ class CommunityCard:
             else: 
                 player.moveBackward(self.value) 
         elif self.Type == "getOut": 
-            player.getOutOfJail += 1
+            player.getOutOfJailFree += 1
         elif self.Type == "jail": 
             player.goesToJail()
         else: 
@@ -219,12 +292,12 @@ class CommunityCard:
         self.customFunc()
 #=======================player class=======================
 class Player:
-    def __init__(self, name, cash, member = None, private = None, category = None, general = None, board=None):
+    def __init__(self, name, cash, member = None, private = None, category = None, general = None, board=None, symbol=None):
         self.name = name
         self.cash = cash
         self.inJail = False
         self.turnsSpentInJail = 0
-        self.getOutOfJail = 0
+        self.getOutOfJailFree = 0
         self.place = 0
         self.lastRoll = 0
         self.rollValue = [0,0]
@@ -234,6 +307,7 @@ class Player:
         self.member = member
         self.board = board
         self.status = None
+        self.symbol = symbol
 
         self.propertiesDefault = {#this is here to allow the properties to be completely wiped and reset
             "pink":[3],
@@ -261,15 +335,25 @@ class Player:
         }
 
         self.monopolys = []
+        self.mortgaged = []
+
     def roll(self):
         self.rollValue = [random.randint(1,6), random.randint(1,6)]
         self.lastRoll = self.rollValue[0]+self.rollValue[1]
-        speak(self.general, f":game_die:========**Dice Roll**========:game_die:\n<@{self.member.id}> rolled a **{self.rollValue[0]}** and a **{self.rollValue[1]}**\nTotal: **{self.lastRoll}**")
+        if self.inJail == True:
+            if self.rollValue[0] == self.rollValue[1]:
+                speak(self.general, f":game_die:========**Dice Roll**========:game_die:\n<@{self.member.id}> rolled a **{self.rollValue[0]}** and a **{self.rollValue[1]}**\nYou **Rolled a double**. You get out of Jail")
+                self.getOutOfJail()
+            else:
+                speak(self.general, f":game_die:========**Dice Roll**========:game_die:\n<@{self.member.id}> rolled a **{self.rollValue[0]}** and a **{self.rollValue[1]}**\nYou need to roll a double to get out of jail.")
+        else:
+            speak(self.general, f":game_die:========**Dice Roll**========:game_die:\n<@{self.member.id}> rolled a **{self.rollValue[0]}** and a **{self.rollValue[1]}**\nTotal: **{self.lastRoll}**")
     def payOut(self, amount):#the player pays the amount
         self.cash = self.cash-amount
+        if self.cash <= 0:
+            self.board.bankcruptcy(self)
     def payIn(self, amount):#the player gets the amount
         self.cash = self.cash+amount
-        self.announceMoneyUpdate("In", amount)
     def announceMoneyUpdate(self, direction, amount, reason = ""):  
         tmplist = [f":dollar:===== Money {direction} =====:dollar:",
                     f"Paid: **£{amount}** {reason}",
@@ -300,20 +384,24 @@ class Player:
                 continue
             i.deMonopolize()
     def buyProperty(self,property):
-        if property.owner == "NotYetAssigned":
+        if property.owner == "NotYetAssigned":# if the house isnt owned
             property.assignOwner(self)
             self.announceMoneyUpdate("Out",property.siteValue, f"for **{property.name}**")
             speak(self.general,f"<@{self.member.id}> just bought **{property.name}**")
+            self.board.updateBoardImageHouses(property)
         else:
             speak(self.general, f"<@{self.member.id}>You cannot buy **{property.name}**, **{property.owner.name}** already owns it")
     def payRent(self, property):
         if property.colour == "utility": property.updateRent(self.lastRoll)# calculates rent based on roll
-        if property.rent > self.cash:
-            bankrupcy(self, property.owner)
+        if property in property.owner.mortgaged:
+            speak(self.genral, "this property is mortgaged and you dont have to pay rent")
         else:
-            self.cash -= property.rent
-            property.owner.giveRent(property.rent)
-            self.announceMoneyUpdate("Out",property.rent, f"for **Rent** to **{property.owner.name}**")
+            if property.rent > self.cash:
+                bankrupcy(self, property.owner)
+            else:
+                self.cash -= property.rent
+                property.owner.giveRent(property.rent)
+                self.announceMoneyUpdate("Out",property.rent, f"for **Rent** to **{property.owner.name}**")
     def giveRent(self, amount):
         self.cash += amount
         self.announceMoneyUpdate("in", amount, "for **Rent**")
@@ -331,8 +419,11 @@ class Player:
     def goesToJail(self):
         self.inJail = True
         self.place = 10
+        self.board.sendToJail(self)
+        speak(self.general, "f<@{self.member.id} Has been sent to Jail>")
     def getsOutOfJail(self):
         self.inJail = False
+        self.board.getOutOfJail(self)
     def moveForward(self, value):
         self.place += value
         if self.place > 39:
@@ -354,46 +445,20 @@ class Player:
         return self.propertyList
     def getPropertyNames(self):
         return list(map(lambda x: x.name, self.getProperties()))
-    def getPropertyNamesEmoji(self):
-        self.PropertyNamesEmoji = []
-        for i in self.getProperties():
-            houses = ":house: "
-            addon = ""
-            prefix = "```"
-            if isinstance(i, PropertyCard):
-                for _ in range(1,i.houses):
-                    addon = addon+houses
-                if i.houses == 5:
-                    addon = ":hotel:"
-                #prefix
-                if i.colour == "pink" or i.colour == "red":
-                    prefix = "```diff\n-"
-                elif i.colour == "darkBlue":
-                    prefix = "```md\n"
-                elif i.colour == "lightBlue":
-                    prefix =  "```yaml\n"
-                elif i.colour == "green":
-                    prefix = "```css\n"
-                elif i.colour == "yellow":
-                    prefix = "```fix\n"
-                elif i.colour == "orange" or i.colour == "brown":
-                    prefix = "```glsl\n"
-                else:
-                    prefix = "```"
-            self.PropertyNamesEmoji.append(prefix+i.name+" "+addon+"\n```")
-        return self.PropertyNamesEmoji
     def sumUp(self):
-        sumUp = [f"```\n=======Overview {self.name}=======",
+        sumUp = [f"\n=======Overview {self.name}=======",
                 f"Cash: £{self.cash}",
                 f"Current Position: {self.place}",
                 "===Properties===",
-                "\n".join(["    -"+x.colour +": "+x.name+"; Houses: "+str(x.houses if isinstance(x,PropertyCard) else "")+(str("; Rent: "+str(x.rent)) if isinstance(x,PropertyCard) else "") for x in self.getProperties()]),
+                "\n".join([f"    {self.board.Deck.index(x)}-"+x.colour +": "+x.name+str(("; Houses: "+str(x.houses)) if isinstance(x,PropertyCard) else "")+(str("; Rent: £"+str(x.rent))) for x in self.getProperties()]),
+                "===Mortgaged Properties===",
+                "\n".join([f"    {self.board.Deck.index(x)}-"+x.colour +": "+x.name+str(("; Houses: "+str(x.houses)) if isinstance(x,PropertyCard) else "")+(str("; Rent: £"+str(x.rent))) for x in self.mortgaged]),
                 "===Monopolys===",
                 "\n".join(["    -"+x for x in self.monopolys]),
                 "===Jail Status===",
                 f"In Jail: {self.inJail}",
-                f"Get put of Jail free cards: {self.getOutOfJail}"
-                "```"]
+                f"Get put of Jail free cards: {self.getOutOfJailFree}"
+                ""]
         return "\n".join(sumUp)
 #=======================creating game cards=================
 
@@ -548,7 +613,7 @@ CardDeck = [#ordered deck where each card corrisponds to the board
 ShitCreak,
 CommunityCards.randomCard(),
 APaddle,
-CommunityCard("payOut", 100, "Income Tax, £200 has been taken from your account"),
+CommunityCard("payOut", 200, "Income Tax, £200 has been taken from your account"),
 ChungusExpress,
 SmokingAlley,
 ChanceCards.randomCard(),
@@ -591,7 +656,7 @@ class Board:
     def __init__(self, server):
         self.server = server
         self.playerList = []
-        self.players = []
+       
         self.Deck = CardDeck
         self.propertyCardsKeyed = PropertyCardDeck
         self.propertyCards = [PropertyCardDeck[x] for x in PropertyCardDeck]
@@ -600,11 +665,61 @@ class Board:
         self.status = None
         self.currentPlayer = None
         self.jail = []
+        self.i = 0
+        self.boardPicture = None
+        self.hiddenBoardMessage = None
+        self.BoardPixelLocation = [
+            (4400,4400),
+            (4000,4600),
+            (3600,4600),
+            (3200,4600),
+            (2800,4600),
+            (2400,4600),
+            (2000,4600),
+            (1600,4600),
+            (1200,4600),
+            (800,4600),
+            (200,4600),# jail
+            (0,4000),
+            (0,3600),
+            (0,3200),
+            (0,2800),
+            (0,2400),
+            (0,2000),
+            (0,1600),
+            (0,1200),
+            (0,800),
+            (0,200),#freeparking
+            (800,0),
+            (1200,0),
+            (1600,0),
+            (2000,0),
+            (2400,0),
+            (2800,0),
+            (3200,0),
+            (3600,0),
+            (4000,0),
+            (4400,0),#go to jail
+            (4400,800),
+            (4400,1200),
+            (4400,1600),
+            (4400,2000),
+            (4400,2400),
+            (4400,2800),
+            (4400,3200),
+            (4400,3600),
+            (4400,4000)
+
+
+        ]
     def addPlayer(self, player):
         self.playerList.append(player)
         self.players = cycle(self.playerList)
     def next(self):
-        self.currentPlayer = next(self.players)
+        self.i += 1
+        if self.i > len(self.playerList)-1:
+            self.i = 0
+        self.currentPlayer = self.playerList[self.i]
         self.turn(self.currentPlayer)
     def changeStatus(self):
         #do code later
@@ -674,17 +789,49 @@ class Board:
         ]
     def sendToJail(self, player):
         self.jail.append(player)
-        player.goesToJail()
+    def getOutOfJail(self,player):
+        self.jail.remove(player)
+        player.getsOutOfJail()
     def turn(self, player):
         if player in self.jail:
             speak(player.general, f"<@{player.member.id}> Its your go but you are in **Jain**. Next go!\nYou have {3-player.turnsSpentInJail} Left. You could also pay £50 to get out or use a get out of jail free card")
             player.turnsSpentInJail += 1
             if player.turnsSpentInJail == 3:
-                self.jail.remove(player)
-                player.getsOutOfJail()
+                self.getOutOfJail(player)
         else:
             speak(player.general, f"<@{player.member.id}> Its your go. Roll the die or pass. Nows your chance to buy sell and bargin.")
-
+    def updateBoardImagePlayerPlace(self, player):
+        newBoard = Image.open("monopolyBoard.png")
+        for i in self.playerList:
+            symbol = i.symbol
+            coords = self.BoardPixelLocation[i.place]
+            newBoard.paste(symbol, coords, symbol.convert('RGBA'))
+        newBoard.save("newBoard.png", "png")
+        updateBoardPicture(self, "newBoard.png")
+    def updateBoardImageHouses(self, property):
+        #add transport and utility icons
+        if property.houses == 0:
+            house = Image.open("Site.png")
+        elif property.houses == 1:
+            house = Image.open("1Houses.png")
+        elif property.houses == 2:
+            house = Image.open("2Houses.png")
+        elif property.houses == 3:
+            house = Image.open("3Houses.png")
+        elif property.houses == 4:
+            house = Image.open("4Houses.png")
+        elif property.houses == 5:
+            house = Image.open("Hotel.png")
+        else:
+            print("house not found")
+            house = None
+        newBoard = Image.open("monopolyBoard.png")
+        coords = self.BoardPixelLocation[self.Deck.index(property)]
+        newBoard.paste(house, coords, house.convert('RGBA'))
+        newBoard.save("monopolyBoard.png", "png")
+        updateBoardPicture(self, "monopolyBoard.png")
+    #def bankcrupcy(self, player):
+        
 #overview   
 class SmartView:
     def __init__(self, player):
@@ -717,10 +864,13 @@ def speak(channel, message):
 @client.event
 async def on_statusChange(player):
     status  = discord.Embed(
-        title = "=====Status Overview=====",
+        title = "====================Status Overview====================",
+        description = "Hello",
         colour = discord.Colour.blue()
     )
-    status.add_field(name = "hello", value = player.sumUp())
+    status.add_field(name = "Your Summery", value = player.sumUp(), inline = False)
+    status.set_image(url = player.board.boardPicture.attachments[0].url)
+    status.add_field(name ="Other Players Positions",value = "\n".join(["","\n".join([(f"{x.name}: {x.place}") for x in player.board.playerList]),""]),inline=False)
     await player.private.send(embed=status)
 #the command to activate it
 def statusUpdate(player):
@@ -762,9 +912,33 @@ async def setup(ctx):# creates or cleans the channels needed for the game, aswel
     role = discord.utils.get(server.roles, name="Monopoly_Player :)")
     await general.set_permissions(role, view_channel = True)
     print("Game Started by",ctx.author.display_name)
+    #this creates a hiden channel to put the board in so i can use a http link in the embed
+    if discord.utils.get(server.channels, name = "board-hidden") == None: #if its not there it will make it
+        boardHiddenChannel = await server.create_text_channel("board-hidden")
+        await boardHiddenChannel.set_permissions(server.default_role, view_channel = False)
+    else:#deletes it and recreates it if its there
+        boardHiddenChannel = discord.utils.get(server.channels, name = "board-hidden")
+        await boardHiddenChannel.delete()
+        boardHiddenChannel = await server.create_text_channel("board-hidden")
+        await boardHiddenChannel.set_permissions(server.default_role, view_channel = False)
+    freshBoard = Image.open("hd_assets\\monopolyBoard.png")
+    freshBoard.save("monopolyBoard.png", "png")
+    updateBoardPicture(board,"monopolyBoard.png")
+    print(board.boardPicture.attachments[0].url)
+
+#BoardPicture update
+@client.event
+async def on_updateBoardPicture(board, path):    
+    boardHiddenChannel = discord.utils.get(board.server.channels, name = "board-hidden")
+    boardPicture = await boardHiddenChannel.send(file = discord.File(fp=f"C:\\Users\\epicf\\Desktop\\Projects\\MonpolyBot\\{path}"))
+    board.boardPicture = boardPicture
+    print("hello")
+
+def updateBoardPicture(board, path):
+    client.dispatch("updateBoardPicture", board, path)
 #===join===
 @client.command()
-async def join(ctx):
+async def join(ctx, symbol = None):
     # settign up needed variables
     server = ctx.guild
     member = ctx.author
@@ -779,7 +953,7 @@ async def join(ctx):
         await category.create_text_channel(name = privateChannelName)
         privateChannel = discord.utils.get(category.channels, name=privateChannelName)
     else:#replaces it
-        await PrivateChannel.delete()
+        await privateChannel.delete()
         await category.create_text_channel(name = privateChannelName)
         privateChannel = discord.utils.get(category.channels, name=privateChannelName)
     #setting permisions
@@ -787,11 +961,28 @@ async def join(ctx):
     await privateChannel.set_permissions(member, view_channel = True)# makes it visable to the player
     if discord.utils.get(server.roles, name="Monopoly_Player :)") not in member.roles:
         await member.add_roles(discord.utils.get(server.roles, name = "Monopoly_Player :)"))
-    #creating the player object    
-    player = Player(userName, 1500, member, privateChannel, category, general, board)
-    board.addPlayer(player)
-    await player.private.send(board.listBoard())
-    print(userName, "has joined the game")
+    #creating the player object
+    if symbol == None:
+        speak(ctx.channel, f"<@{member.id}> You need to pick a symbol, please do .join 'symbol here'\nSymbols can be: !,@,#,&,?,%")
+    else:
+        if symbol == "!":
+            symbol = Image.open("!.png")
+        elif symbol == "?":
+            symbol = Image.open("q.png")
+        elif symbol == "&":
+            symbol = Image.open("&.png")
+        elif symbol == "#":
+            symbol = Image.open("#.png")
+        elif symbol == "@":
+            symbol = Image.open("@.png")
+        elif symbol == "%":
+            symbol = Image.open("%.png")
+        else:
+            speak(general, f"<@{member.id}> You need to pick a symbol, please do .join 'symbol here'\nSymbols can be: !,@,#,&,?,%")
+        player = Player(userName, 1500, member, privateChannel, category, general, board, symbol)
+        board.addPlayer(player)
+        await player.private.send(board.listBoard())
+        print(userName, "has joined the game")
 
 #===roll===
 @client.command()
@@ -801,8 +992,10 @@ async def roll(ctx):
     player = getPlayer(ctx, board)
     player.roll()
     print(player.lastRoll)
-    player.moveForward(player.lastRoll)
-    print(f"player landed on {board.getPlaceName(player.place)}")#
+    if player.inJail == False:
+        player.moveForward(player.lastRoll)
+        board.updateBoardImagePlayerPlace(player)
+        print(f"player landed on {board.getPlaceName(player.place)}")#
 
 #===buying===
 @client.command()
@@ -813,13 +1006,12 @@ async def buy(ctx, propertyNumber):
     #getting the proeprty
     theProperty = board.Deck[int(propertyNumber)]
     if theProperty in board.propertyCards:# if its a property you can buy that isnt owned
-        if theProperty.owner == player:# if the property is owned by me
+        if theProperty.owner == player:# if the property is owned by the player
             theProperty.buyHouse()
         else:
             player.buyProperty(theProperty)
     else:
         await player.private.send("You cannot buy this")
-    statusUpdate(player)
 
 #===give===
 @client.command()
@@ -844,12 +1036,15 @@ async def status(ctx):
 
 #===sell===
 @client.command()
-async def sell(ctx, item, value, target = None):
+async def sell(ctx, item, value = None, target = None):
     board = getBoard(ctx)
     player = getPlayer(ctx, board)
     theProperty = board.Deck[int(item)]
-    if target == None:
-        print("oh no")
+    if target == None and value == None:# if its just the number of the property it means sell house
+        if theProperty == board.propertyCardsKeyed[int(item)]:# if its on the board
+            theProperty.sellHouse()      
+        else:
+            speak(player.general, "you cannot sell that")
         return None
     elif "@" in target and theProperty == board.propertyCardsKeyed[int(item)]:
         target = getPlayerFromName(ctx.message.mentions[0].display_name, board)
@@ -870,7 +1065,22 @@ async def pay(ctx, value = "default", target = None):
     elif value == "default" and (player.place == 4 or player.place == 38):#must be a tax, this is handeled witha community card
         card = board.Deck[player.place]
         card.activate(player)
-    if target != None and value != "default": 
+    elif value == "jail":
+        if player.inJail and target == None:
+            player.payBank(50)
+            board.getOutOfJail(player)
+            speak(player.general, f"<@{player.member.id}> Got **out of jail**. They're now back in the game")
+        elif player.inJail and target == "card":
+            if player.getOutOfJailFree > 0:
+                player.getOutOfJailFree -= 1
+                board.getOutOfJail(player)
+                speak(player.general, f"<@{player.member.id}> Got **out of jail**. They're now back in the game")
+            else:
+                speak(player.general, "You dont have any get out of jail free cards")  
+        else:
+            speak(player.general, "You are not in jail")
+        
+    if target != None and value != "default" and value != "jail": 
         target = getPlayerFromName(ctx.message.mentions[0].display_name, board)
         player.payPlayer(target, value)
 
@@ -932,11 +1142,52 @@ async def start(ctx):
 async def next(ctx):
     board = getBoard(ctx)
     board.next()
-    
+
+#===go to jail===
+@client.command()
+async def jail(ctx, target = None):
+    board = getBoard(ctx)
+    player = getPlayer(ctx, board)
+    if target == None:
+        player.goesToJail()
+    else:
+        target = getPlayerFromName(ctx.message.mentions[0].display_name, board)
+        target.goesToJail()
+
+#===jail card===
+@client.command()
+async def jailcard(ctx, target = None):
+    board = getBoard(ctx)
+    player = getPlayer(ctx, board)
+    if target == None:
+        player.getOutOfJailFree +=1
+    else:
+        target = getPlayerFromName(ctx.message.mentions[0].display_name, board)
+        target.getOutOfJailFree +=1#
+
+#===mortage===
+@client.command()
+async def mortgage(ctx, propertyNumber):
+    board = getBoard(ctx)
+    player = getPlayer(ctx, board)
+    theProperty = board.Deck[int(propertyNumber)]
+    if theProperty in board.propertyCards:
+        theProperty.mortgage()
+
+#===demortage===
+@client.command()
+async def demortgage(ctx, propertyNumber):
+    board = getBoard(ctx)
+    player = getPlayer(ctx, board)
+    theProperty = board.Deck[int(propertyNumber)]
+    if theProperty in board.propertyCards:
+        theProperty.deMortgage()
+
 #===clear===
 @client.command()
 async def clear(ctx, amount = 1):
     await ctx.channel.purge(limit=amount)
+
 
 Token = open("hidden/BotToken.json","r")
 Token = json.loads(Token.read())
